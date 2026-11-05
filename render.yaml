@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: citizen-affairs-portal
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: citizen-affairs-db
+          property: connectionString
+      - key: ADMIN_USER
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+databases:
+  - name: citizen-affairs-db
+    plan: free
+    databaseName: citizens
+    user: citizens_user
