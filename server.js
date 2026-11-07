@@ -40,6 +40,13 @@ async function initDb() {
       employee_note TEXT DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS staff_declarations (
+      id BIGSERIAL PRIMARY KEY,
+      staff_username VARCHAR(100) NOT NULL DEFAULT 'موظف',
+      declaration_text TEXT NOT NULL,
+      ip_address VARCHAR(80),
+      accepted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS attachments (
       id BIGSERIAL PRIMARY KEY,
       submission_id BIGINT NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
@@ -108,18 +115,24 @@ app.get('/api/track/:code', async (req, res) => {
   } catch { res.status(500).json({ error: 'تعذر الاستعلام حالياً' }); }
 });
 
-app.post('/api/staff/login', loginLimiter, (req, res) => {
-  if (!ADMIN_USER || !ADMIN_PASSWORD || !JWT_SECRET) return res.status(503).json({ error: 'لم يتم إعداد حساب الموظف في إعدادات الاستضافة' });
-  const username = clean(req.body?.username, 100);
-  const password = String(req.body?.password || '');
-  const a = Buffer.from(username), b = Buffer.from(ADMIN_USER);
-  const c = Buffer.from(password), d = Buffer.from(ADMIN_PASSWORD);
-  const userOk = a.length === b.length && crypto.timingSafeEqual(a,b);
-  const passOk = c.length === d.length && crypto.timingSafeEqual(c,d);
-  if (!userOk || !passOk) return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة' });
+app.post('/api/staff/login', loginLimiter, async (req, res) => {
+  if (!ADMIN_PASSWORD || !JWT_SECRET) return res.status(503).json({ error: 'لم يتم إعداد رمز دخول الموظف في إعدادات الاستضافة' });
+  const pin = String(req.body?.pin || '');
+  const accepted = req.body?.undertakingAccepted === true;
+  const a = Buffer.from(pin), b = Buffer.from(ADMIN_PASSWORD);
+  const pinOk = a.length === b.length && crypto.timingSafeEqual(a,b);
+  if (!pinOk) return res.status(401).json({ error: 'رمز الدخول غير صحيح' });
+  if (!accepted) return res.status(400).json({ error: 'يجب الموافقة على تعهد الموظف أولاً' });
+  const username = 'موظف';
+  try {
+    await pool.query(
+      'INSERT INTO staff_declarations (staff_username,declaration_text,ip_address) VALUES ($1,$2,$3)',
+      [username, 'أتعهد بالمحافظة على سرية بيانات المواطنين وطلباتهم، وعدم إفشاء المعلومات أو استخدامها خارج أغراض العمل الرسمي، والالتزام بالتعليمات والصلاحيات الممنوحة لي.', clean(req.ip,80)]
+    );
+  } catch { return res.status(500).json({ error: 'تعذر تسجيل التعهد، حاول مرة أخرى' }); }
   const token = jwt.sign({ username, role: 'admin' }, JWT_SECRET, { expiresIn: '8h' });
   res.cookie('staff_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 8*60*60*1000 });
-  res.json({ message: 'تم تسجيل الدخول' });
+  res.json({ message: 'تم تسجيل الدخول وتوثيق التعهد' });
 });
 app.post('/api/staff/logout', (_req,res) => { res.clearCookie('staff_token'); res.json({ message: 'تم تسجيل الخروج' }); });
 app.get('/api/staff/me', auth, (req,res) => res.json({ username: req.staff.username, role: req.staff.role }));
